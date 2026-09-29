@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Talk to Ava</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 32px 16px;
+    }
+
+    main {
+      max-width: 720px;
+      margin: auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px #00000014;
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 0;
+      padding: 20px;
+      font-size: 22px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    #messages {
+      min-height: 360px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      white-space: pre-wrap;
+    }
+
+    .user {
+      align-self: flex-end;
+      background: #2563eb;
+      color: white;
+    }
+
+    .ava {
+      align-self: flex-start;
+      background: #eef2f7;
+      color: #111827;
+    }
+
+    form {
+      display: flex;
+      gap: 8px;
+      padding: 16px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    input {
+      flex: 1;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+
+    button {
+      padding: 12px 18px;
+      border: 0;
+      border-radius: 8px;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Talk to Ava</h1>
+
+    <div id="messages">
+      <div class="message ava">Hello! I'm Ava. What can I help you with today?</div>
+    </div>
+
+    <form id="chat-form">
+      <input id="message-input" placeholder="Message Ava…" autocomplete="off" required>
+      <button id="send-button" type="submit">Send</button>
+    </form>
+  </main>
+
+  <script>
+    const endpoint = "https://ai-firm.jake-leraul.workers.dev/api/chat";
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("message-input");
+    const messages = document.getElementById("messages");
+    const button = document.getElementById("send-button");
+
+    function addMessage(text, sender) {
+      const element = document.createElement("div");
+      element.className = `message ${sender}`;
+      element.textContent = text;
+      messages.appendChild(element);
+      element.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const message = input.value.trim();
+      if (!message) return;
+
+      addMessage(message, "user");
+      input.value = "";
+      input.disabled = true;
+      button.disabled = true;
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ message })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        addMessage(data.reply || "Ava did not return a reply.", "ava");
+      } catch (error) {
+        addMessage(`Unable to contact Ava: ${error.message}`, "ava");
+      } finally {
+        input.disabled = false;
+        button.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>

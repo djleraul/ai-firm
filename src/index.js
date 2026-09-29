@@ -38,47 +38,279 @@ STYLE
 Be concise, practical, helpful, and honest about uncertainty.
 `;
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+const VALID_STATUSES = [
+  "todo",
+  "in_progress",
+  "blocked",
+  "awaiting_approval",
+  "done",
+  "cancelled",
+];
+
+const VALID_PRIORITIES = [
+  "low",
+  "normal",
+  "high",
+  "critical",
+];
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders,
+    },
+  });
+}
+
+function isValidStatus(status) {
+  return VALID_STATUSES.includes(status);
+}
+
+function isValidPriority(priority) {
+  return VALID_PRIORITIES.includes(priority);
+}
+
+function isValidTaskId(taskId) {
+  return /^task_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    taskId
+  );
+}
 
 export default {
   async fetch(request, env) {
-    if (request.method === "GET") {
-      return new Response("Ava is online. Send her a POST request.");
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
     }
 
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
-    }
+    const url = new URL(request.url);
+    const path = url.pathname;
 
-    const body = await request.json();
+    try {
+      // GET /tasks
+      if (request.method === "GET" && path === "/tasks") {
+        const { results } = await env.DB.prepare(`
+          SELECT
+            id,
+            title,
+            description,
+            status,
+            priority,
+            assigned_to,
+            created_at,
+            updated_at
+          FROM tasks
+          ORDER BY
+            CASE priority
+              WHEN 'critical' THEN 1
+              WHEN 'high' THEN 2
+              WHEN 'normal' THEN 3
+              WHEN 'low' THEN 4
+            END,
+            created_at DESC
+        `).all();
 
-    if (!body.message) {
-      return Response.json(
-        { error: "Please provide a message." },
-        { status: 400 }
+        return json({ tasks: results });
+      }
+
+      // POST /tasks
+      if (request.method === "POST" && path === "/tasks") {
+        const body = await request.json();
+
+        if (!body.title || typeof body.title !== "string") {
+          return json({ error: "A task title is required." }, 400);
+        }
+
+        const title = body.title.trim();
+
+        if (!title) {
+          return json({ error: "A task title is required." }, 400);
+        }
+
+        const description =
+          typeof body.description === "string"
+            ? body.description.trim()
+            : "";
+
+        const status = isValidStatus(body.status) ? body.status : "todo";
+        const priority = isValidPriority(body.priority)
+          ? body.priority
+          : "normal";
+
+        const assignedTo =
+          typeof body.assigned_to === "string" && body.assigned_to.trim()
+            ? body.assigned_to.trim()
+            : "Ava";
+
+        const taskId = `task_${crypto.randomUUID()}`;
+
+        await env.DB.prepare(`
+          INSERT INTO tasks (
+            id,
+            title,
+            description,
+            status,
+            priority,
+            assigned_to,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+          .bind(
+            taskId,
+            title,
+            description,
+            status,
+            priority,
+            assignedTo
+          )
+          .run();
+
+        const task = await env.DB.prepare(`
+          SELECT * FROM tasks WHERE id = ?
+        `)
+          .bind(taskId)
+          .first();
+
+        return json({ task }, 201);
+      }
+
+      // PATCH /tasks/:id
+      if (request.method === "PATCH" && path.startsWith("/tasks/")) {
+        const taskId = path.split("/")[2];
+
+        if (!isValidTaskId(taskId)) {
+          return json({ error: "A valid task ID is required." }, 400);
+        }
+
+        const existingTask = await env.DB.prepare(`
+          SELECT * FROM tasks WHERE id = ?
+        `)
+          .bind(taskId)
+          .first();
+
+        if (!existingTask) {
+          return json({ error: "Task not found." }, 404);
+        }
+
+        const body = await request.json();
+
+        const title =
+          typeof body.title === "string" && body.title.trim()
+            ? body.title.trim()
+            : existingTask.title;
+
+        const description =
+          typeof body.description === "string"
+            ? body.description.trim()
+            : existingTask.description;
+
+        const status = body.status
+          ? isValidStatus(body.status)
+            ? body.status
+            : null
+          : existingTask.status;
+
+        const priority = body.priority
+          ? isValidPriority(body.priority)
+            ? body.priority
+            : null
+          : existingTask.priority;
+
+        const assignedTo =
+          typeof body.assigned_to === "string" && body.assigned_to.trim()
+            ? body.assigned_to.trim()
+            : existingTask.assigned_to;
+
+        if (!status) {
+          return json({ error: "Invalid task status." }, 400);
+        }
+
+        if (!priority) {
+          return json({ error: "Invalid task priority." }, 400);
+        }
+
+        await env.DB.prepare(`
+          UPDATE tasks
+          SET
+            title = ?,
+            description = ?,
+            status = ?,
+            priority = ?,
+            assigned_to = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `)
+          .bind(
+            title,
+            description,
+            status,
+            priority,
+            assignedTo,
+            taskId
+          )
+          .run();
+
+        const task = await env.DB.prepare(`
+          SELECT * FROM tasks WHERE id = ?
+        `)
+          .bind(taskId)
+          .first();
+
+        return json({ task });
+      }
+
+      // POST / — Ava chat
+      if (request.method === "POST" && path === "/") {
+        const body = await request.json();
+
+        if (!body.message || typeof body.message !== "string") {
+          return json({ error: "A message is required." }, 400);
+        }
+
+        const result = await env.AI.run(
+          "@cf/meta/llama-3.1-8b-instruct-fp8",
+          {
+            messages: [
+              {
+                role: "system",
+                content: AVA_INSTRUCTIONS,
+              },
+              {
+                role: "user",
+                content: body.message,
+              },
+            ],
+            temperature: 0.2,
+          }
+        );
+
+        return json({
+          reply: result.response ?? "I was unable to generate a response.",
+        });
+      }
+
+      return json({ error: "Route not found." }, 404);
+    } catch (error) {
+      console.error(error);
+
+      return json(
+        {
+          error: error instanceof Error ? error.message : "Worker error",
+        },
+        500
       );
     }
-
-const result = await env.AI.run(
-  "@cf/meta/llama-3.1-8b-instruct-fp8",
-  {
-    messages: [
-      {
-        role: "system",
-        content: AVA_INSTRUCTIONS,
-      },
-      {
-        role: "user",
-        content: body.message,
-      },
-    ],
-    temperature: 0.2,
-  }
-);
-
-
-    return Response.json({
-      bot: "Ava",
-      reply: result.response
-    });
-  }
+  },
 };
