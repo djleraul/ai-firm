@@ -1,4 +1,4 @@
-$code = @'
+@'
 const AVA_INSTRUCTIONS = `
 You are Ava, the chief of staff for AI Firm.
 
@@ -371,7 +371,5 @@ export default {
     }
   },
 };
-'@
-
-Set-Content -Path src/index.js -Value $code
+'@ | Set-Content src/index.js -Encoding UTF8
 Write-Host "✅ src/index.js updated with task injection and debug logging"
