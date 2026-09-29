@@ -39,7 +39,7 @@ export default {
     // --- Detect write intent ---
     const msg = userMessage.toLowerCase();
     const isCreate = /create|add|new task|make a task/.test(msg);
-    const isUpdate = /update|change|mark|set|complete|finish|move/.test(msg);
+    const isUpdate = /update|change|mark|set|complete|finish|move|done|in_progress|blocked/.test(msg);
 
     let writeResult = null;
 
