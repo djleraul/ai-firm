@@ -1,225 +1,240 @@
-const MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      ...corsHeaders,
-    },
-  });
-}
-
-const TOOLS = [
-  {
-    name: "create_task",
-    description: "Create a new task in the task database.",
-    parameters: {
-      type: "object",
-      properties: {
-        title:       { type: "string",  description: "Short task title." },
-        assigned_to: { type: "string",  description: "Assignee: Ava, Rowan, Mira, or Sol." },
-        priority:    { type: "string",  enum: ["low", "normal", "high", "critical"] },
-        status:      { type: "string",  enum: ["todo", "in_progress", "blocked", "awaiting_approval", "done", "cancelled"] },
-        due_date:    { type: "string",  description: "Optional due date in YYYY-MM-DD format." },
-        description: { type: "string",  description: "Optional additional detail." },
-      },
-      required: ["title"],
-    },
-  },
-  {
-    name: "update_task",
-    description: "Update one or more fields on an existing task by its ID.",
-    parameters: {
-      type: "object",
-      properties: {
-        id:          { type: "string", description: "The ID of the task to update." },
-        title:       { type: "string" },
-        assigned_to: { type: "string" },
-        priority:    { type: "string", enum: ["low", "normal", "high", "critical"] },
-        status:      { type: "string", enum: ["todo", "in_progress", "blocked", "awaiting_approval", "done", "cancelled"] },
-        due_date:    { type: "string" },
-        description: { type: "string" },
-      },
-      required: ["id"],
-    },
-  },
-];
-
-async function handleToolCall(toolCall, env) {
-  const args = typeof toolCall.arguments === "string"
-    ? JSON.parse(toolCall.arguments)
-    : toolCall.arguments;
-
-  if (toolCall.name === "create_task") {
-    const id  = crypto.randomUUID();
-    const now = new Date().toISOString();
-    await env.DB.prepare(`
-      INSERT INTO tasks (id, title, description, assigned_to, priority, status, due_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      id,
-      args.title,
-      args.description ?? null,
-      args.assigned_to ?? null,
-      args.priority    ?? "normal",
-      args.status      ?? "todo",
-      args.due_date    ?? null,
-      now,
-      now
-    ).run();
-    return { success: true, id, message: `Task "${args.title}" created with ID ${id}.` };
-  }
-
-  if (toolCall.name === "update_task") {
-    const { id, ...fields } = args;
-    const setClauses = [];
-    const values     = [];
-    for (const [col, val] of Object.entries(fields)) {
-      setClauses.push(`${col} = ?`);
-      values.push(val);
-    }
-    setClauses.push("updated_at = ?");
-    values.push(new Date().toISOString());
-    values.push(id);
-    await env.DB.prepare(
-      `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`
-    ).bind(...values).run();
-    return { success: true, message: `Task ${id} updated.` };
-  }
-
-  return { success: false, message: `Unknown tool: ${toolCall.name}` };
-}
-
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-
     if (request.method !== "POST") {
-      return json({ error: "Use POST with a JSON body containing a message field." }, 405);
+      return new Response("Method not allowed", { status: 405 });
     }
 
+    let body;
     try {
-      const body    = await request.json();
-      const message = typeof body.message === "string" ? body.message.trim() : "";
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-      if (!message) {
-        return json({ error: "A non-empty message is required." }, 400);
-      }
+    const userMessage = body.message;
+    if (!userMessage) {
+      return new Response(JSON.stringify({ error: "Missing 'message' field." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-      const { results: tasks } = await env.DB.prepare(`
-        SELECT
-          id,
-          title,
-          description,
-          assigned_to,
-          status,
-          priority,
-          created_at,
-          updated_at,
-          completed_at
-        FROM tasks
-        ORDER BY
-          CASE priority
-            WHEN 'critical' THEN 1
-            WHEN 'high'     THEN 2
-            WHEN 'normal'   THEN 3
-            WHEN 'low'      THEN 4
-            ELSE 5
-          END,
-          updated_at DESC
-        LIMIT 50
-      `).all();
+    const systemPrompt = `You are Ava, Chief of Staff at AI Firm.
+Your role is to organize priorities, create tasks and plans, track decisions, and prepare briefings.
+You have access to the task database and can read and write tasks.
+Do not invent facts about AI Firm. Do not claim a physical body or location.
+Always require approval before sending messages, spending money, publishing content, deleting data, or changing instructions.
+Be concise, practical, and honest about uncertainty.
 
-      const taskContext = tasks.length > 0
-        ? JSON.stringify(tasks, null, 2)
-        : "No task records currently exist.";
+Agents:
+- Ava (Chief of Staff)
+- Rowan (Researcher)
+- Mira (Software Engineer)
+- Sol (Editor/Analyst)
 
-      const systemPrompt = `
-You are Ava, Chief of Staff for AI Firm.
+Valid statuses: todo, in_progress, blocked, awaiting_approval, done, cancelled
+Valid priorities: low, normal, high, critical`;
 
-Your role is to organize priorities, create clear plans, track decisions,
-and provide concise operational briefings.
+    const tools = [
+      {
+        name: "list_tasks",
+        description: "List all tasks in the database, optionally filtered by status or assigned agent.",
+        parameters: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              description: "Filter by status (todo, in_progress, blocked, awaiting_approval, done, cancelled). Omit to return all.",
+            },
+            assigned_to: {
+              type: "string",
+              description: "Filter by agent name (e.g. Mira, Sol). Omit to return all.",
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "create_task",
+        description: "Create a new task and insert it into the database.",
+        parameters: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "A short title for the task.",
+            },
+            assigned_to: {
+              type: "string",
+              description: "The agent this task is assigned to.",
+            },
+            priority: {
+              type: "string",
+              description: "Priority level: low, normal, high, or critical.",
+            },
+            status: {
+              type: "string",
+              description: "Initial status. Defaults to 'todo' if omitted.",
+            },
+          },
+          required: ["title"],
+        },
+      },
+      {
+        name: "update_task",
+        description: "Update one or more fields on an existing task by its ID.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "The UUID of the task to update.",
+            },
+            title: { type: "string" },
+            assigned_to: { type: "string" },
+            priority: { type: "string" },
+            status: { type: "string" },
+          },
+          required: ["id"],
+        },
+      },
+    ];
 
-Your colleagues: Rowan (Researcher), Mira (Software Engineer), Sol (Editor/Analyst).
-
-AUTHORITATIVE TASK DATABASE:
-${taskContext}
-
-RULES FOR TASK QUESTIONS:
-- The task database above is the source of truth for task information.
-- If a requested task is present, report its title, status, priority,
-  assignee, and relevant description or dates.
-- Never say you lack task access or that no task source is connected when
-  task records are provided above.
-- Do not invent tasks, statuses, assignments, dates, or other details.
-- If the requested task is not in the database, say that it was not found.
-- Be concise, practical, and honest about uncertainty.
-
-WRITING TASKS:
-- Use create_task when the user asks you to create or add a task.
-- Use update_task when the user asks you to change status, priority,
-  assignee, or any other field on an existing task.
-- After a successful tool call, confirm what was done in plain language.
-
-Actions requiring approval before acting: sending messages, spending money,
-publishing, deleting data, or changing instructions.
-`;
-
-      // ── First AI call ───────────────────────────────────────────────────────
-      const firstResponse = await env.AI.run(MODEL, {
+    // --- First AI call ---
+    let aiResponse;
+    try {
+      aiResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user",   content: message },
+          { role: "user", content: userMessage },
         ],
-        tools: TOOLS,
+        tools,
         temperature: 0.2,
       });
+    } catch (err) {
+      return new Response(
+        JSON.stringify({ error: "AI call failed.", details: err.message }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-      // ── Handle tool calls ───────────────────────────────────────────────────
-      if (firstResponse.tool_calls?.length) {
-        const toolResultMsgs = await Promise.all(
-          firstResponse.tool_calls.map(async (tc) => ({
-            role:         "tool",
-            name:         tc.name,
-            tool_call_id: tc.id ?? tc.name,
-            content:      JSON.stringify(await handleToolCall(tc, env)),
-          }))
+    // --- Tool execution ---
+    let toolResultContent = null;
+    let calledToolName = null;
+
+    if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
+      const toolCall = aiResponse.tool_calls[0];
+      calledToolName = toolCall.name;
+      const args = toolCall.arguments ?? {};
+
+      try {
+        if (calledToolName === "list_tasks") {
+          let query = "SELECT id, title, assigned_to, priority, status, created_at, updated_at FROM tasks";
+          const conditions = [];
+          const params = [];
+
+          if (args.status) {
+            conditions.push("status = ?");
+            params.push(args.status);
+          }
+          if (args.assigned_to) {
+            conditions.push("assigned_to = ?");
+            params.push(args.assigned_to);
+          }
+          if (conditions.length > 0) {
+            query += " WHERE " + conditions.join(" AND ");
+          }
+          query += " ORDER BY created_at DESC";
+
+          const result = await env.DB.prepare(query).bind(...params).all();
+          toolResultContent = JSON.stringify(result.results);
+
+        } else if (calledToolName === "create_task") {
+          const id = crypto.randomUUID();
+          const now = new Date().toISOString();
+          const title = args.title;
+          const assigned_to = args.assigned_to ?? null;
+          const priority = args.priority ?? "normal";
+          const status = args.status ?? "todo";
+
+          await env.DB.prepare(
+            "INSERT INTO tasks (id, title, assigned_to, priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          )
+            .bind(id, title, assigned_to, priority, status, now, now)
+            .run();
+
+          toolResultContent = JSON.stringify({ success: true, id, title, assigned_to, priority, status });
+
+        } else if (calledToolName === "update_task") {
+          const { id, ...fields } = args;
+          const allowed = ["title", "assigned_to", "priority", "status"];
+          const setClauses = [];
+          const params = [];
+
+          for (const key of allowed) {
+            if (fields[key] !== undefined) {
+              setClauses.push(`${key} = ?`);
+              params.push(fields[key]);
+            }
+          }
+
+          if (setClauses.length === 0) {
+            toolResultContent = JSON.stringify({ success: false, error: "No valid fields to update." });
+          } else {
+            const now = new Date().toISOString();
+            setClauses.push("updated_at = ?");
+            params.push(now);
+            params.push(id);
+
+            await env.DB.prepare(
+              `UPDATE tasks SET ${setClauses.join(", ")} WHERE id = ?`
+            )
+              .bind(...params)
+              .run();
+
+            toolResultContent = JSON.stringify({ success: true, id, updated: fields });
+          }
+        } else {
+          toolResultContent = JSON.stringify({ error: "Unknown tool." });
+        }
+      } catch (err) {
+        return new Response(
+          JSON.stringify({ error: "Tool execution failed.", details: err.message }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
         );
+      }
+    }
 
-        const secondResponse = await env.AI.run(MODEL, {
+    // --- Second AI call (if a tool was used) ---
+    let finalReply;
+
+    if (calledToolName && toolResultContent !== null) {
+      try {
+        const secondResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
           messages: [
-            { role: "system",    content: systemPrompt },
-            { role: "user",      content: message },
-            { role: "assistant", content: firstResponse.response ?? "", tool_calls: firstResponse.tool_calls },
-            ...toolResultMsgs,
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+            { role: "assistant", content: `Tool used: ${calledToolName}` },
+            { role: "tool", content: toolResultContent },
           ],
           temperature: 0.2,
         });
-
-        return json({ reply: secondResponse.response || "I could not generate a response." });
+        finalReply = secondResponse.response ?? "Done.";
+      } catch (err) {
+        return new Response(
+          JSON.stringify({ error: "Second AI call failed.", details: err.message }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
       }
-
-      // ── No tool calls — return directly ────────────────────────────────────
-      return json({ reply: firstResponse.response || "I could not generate a response." });
-
-    } catch (error) {
-      console.error("Worker error:", error);
-      return json(
-        {
-          error:   "Unable to process the request.",
-          details: error instanceof Error ? error.message : String(error),
-        },
-        500
-      );
+    } else {
+      finalReply = aiResponse.response ?? "No response generated.";
     }
+
+    return new Response(JSON.stringify({ reply: finalReply }), {
+      headers: { "Content-Type": "application/json" },
+    });
   },
 };
