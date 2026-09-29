@@ -50,7 +50,7 @@ console.log("Tasks JSON:", JSON.stringify(tasks, null, 2));
       // Ask AI to extract task fields as JSON
       let extracted;
       try {
-        const extractResponse = await env.AI.run("@hf/nousresearch/hermes-2-pro-mistral-7b", {
+        const extractResponse = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
           messages: [
             {
               role: "system",
@@ -108,7 +108,7 @@ No explanation. No markdown. Just the JSON object.`
       // Ask AI to extract update fields as JSON
       let extracted;
       try {
-        const extractResponse = await env.AI.run("@hf/nousresearch/hermes-2-pro-mistral-7b", {
+        const extractResponse = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
           messages: [
             {
               role: "system",
