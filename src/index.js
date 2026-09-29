@@ -333,11 +333,6 @@ Use this task data for task questions, status briefings, priorities, and plannin
         });
 
 
-        return json({
-          reply: result.response ?? "I was unable to generate a response.",
-        });
-      }
-
       return json({ error: "Route not found." }, 404);
     } catch (error) {
       console.error(error);
