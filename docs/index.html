@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Firm Dashboard</title>
+
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #151d33;
+      --panel-light: #1d2945;
+      --text: #edf2ff;
+      --muted: #9eabc7;
+      --accent: #6ea8fe;
+      --success: #3ddc97;
+      --danger: #ff6b6b;
+      --border: #2b3b60;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      padding: 28px;
+      background: #10182b;
+      border-bottom: 1px solid var(--border);
+    }
+
+    header h1 {
+      margin: 0 0 8px;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    main {
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    h2 {
+      margin-top: 0;
+      font-size: 1.2rem;
+    }
+
+    form {
+      display: grid;
+      gap: 12px;
+    }
+
+    input,
+    textarea,
+    select,
+    button {
+      padding: 11px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font: inherit;
+    }
+
+    input,
+    textarea,
+    select {
+      background: #0e1628;
+      color: var(--text);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 86px;
+    }
+
+    button {
+      border: 0;
+      background: var(--accent);
+      color: #07101f;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      filter: brightness(1.08);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .task-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .task-card {
+      background: var(--panel-light);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .task-card h3 {
+      margin: 0 0 8px;
+    }
+
+    .task-card p {
+      color: var(--muted);
+      margin: 0 0 14px;
+      white-space: pre-wrap;
+    }
+
+    .task-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .badge {
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #0e1628;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .status-select {
+      margin-left: auto;
+      min-width: 160px;
+    }
+
+    .chat-messages {
+      height: 390px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-right: 4px;
+    }
+
+    .message {
+      padding: 12px;
+      border-radius: 10px;
+      max-width: 90%;
+      white-space: pre-wrap;
+      line-height: 1.4;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: #315d9c;
+    }
+
+    .message.ava {
+      align-self: flex-start;
+      background: var(--panel-light);
+    }
+
+    .message-label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .error {
+      color: var(--danger);
+      margin: 10px 0 0;
+    }
+
+    .success {
+      color: var(--success);
+      margin: 10px 0 0;
+    }
+
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 32px;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>AI Firm Dashboard</h1>
+    <p>Tasks, priorities, and Ava’s chief-of-staff workspace.</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Create Task</h2>
+
+      <form id="task-form">
+        <input
+          id="task-title"
+          type="text"
+          placeholder="Task title"
+          required
+        />
+
+        <textarea
+          id="task-description"
+          placeholder="Description (optional)"
+        ></textarea>
+
+        <div class="form-row">
+          <select id="task-priority">
+            <option value="low">Low priority</option>
+            <option value="normal" selected>Normal priority</option>
+            <option value="high">High priority</option>
+            <option value="critical">Critical priority</option>
+          </select>
+
+          <input
+            id="task-assigned-to"
+            type="text"
+            value="Ava"
+            placeholder="Assigned to"
+          />
+        </div>
+
+        <button id="create-task-button" type="submit">
+          Create Task
+        </button>
+      </form>
+
+      <p id="task-form-message"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Chat with Ava</h2>
+
+      <div id="chat-messages" class="chat-messages">
+        <div class="message ava">
+          <span class="message-label">Ava</span>
+          Hello. I can help organize priorities, tasks, and plans.
+        </div>
+      </div>
+
+      <form id="chat-form">
+        <textarea
+          id="chat-input"
+          placeholder="Message Ava..."
+          required
+        ></textarea>
+
+        <button id="send-message-button" type="submit">
+          Send Message
+        </button>
+      </form>
+
+      <p id="chat-error" class="error"></p>
+    </section>
+
+    <section class="panel full-width">
+      <h2>Tasks</h2>
+      <div id="task-list" class="task-list">
+        <p class="empty">Loading tasks...</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = "https://ai-firm.jake-leraul.workers.dev";
+
+    const VALID_STATUSES = [
+      "todo",
+      "in_progress",
+      "blocked",
+      "awaiting_approval",
+      "done",
+      "cancelled"
+    ];
+
+    const taskList = document.getElementById("task-list");
+    const taskForm = document.getElementById("task-form");
+    const taskFormMessage = document.getElementById("task-form-message");
+    const chatForm = document.getElementById("chat-form");
+    const chatInput = document.getElementById("chat-input");
+    const chatMessages = document.getElementById("chat-messages");
+    const chatError = document.getElementById("chat-error");
+
+    function escapeHtml(value) {
+      const div = document.createElement("div");
+      div.textContent = value ?? "";
+      return div.innerHTML;
+    }
+
+    function formatStatus(status) {
+      return status.replaceAll("_", " ");
+    }
+
+    function addChatMessage(sender, message) {
+      const messageElement = document.createElement("div");
+      messageElement.className = `message ${sender}`;
+
+      const label = sender === "user" ? "You" : "Ava";
+
+      messageElement.innerHTML = `
+        <span class="message-label">${label}</span>
+        ${escapeHtml(message)}
+      `;
+
+      chatMessages.appendChild(messageElement);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function loadTasks() {
+      taskList.innerHTML = `<p class="empty">Loading tasks...</p>`;
+
+      try {
+        const response = await fetch(`${API_BASE}/tasks`);
+
+        if (!response.ok) {
+          throw new Error("Unable to load tasks.");
+        }
+
+        const data = await response.json();
+        const tasks = data.tasks ?? [];
+
+        if (tasks.length === 0) {
+          taskList.innerHTML = `<p class="empty">No tasks yet.</p>`;
+          return;
+        }
+
+        taskList.innerHTML = tasks.map((task) => `
+          <article class="task-card">
+            <h3>${escapeHtml(task.title)}</h3>
+            <p>${escapeHtml(task.description || "No description provided.")}</p>
+
+            <div class="task-meta">
+              <span class="badge">Priority: ${escapeHtml(task.priority)}</span>
+              <span class="badge">Assigned: ${escapeHtml(task.assigned_to)}</span>
+
+              <select
+                class="status-select"
+                data-task-id="${escapeHtml(task.id)}"
+                aria-label="Update task status"
+              >
+                ${VALID_STATUSES.map((status) => `
+                  <option
+                    value="${status}"
+                    ${task.status === status ? "selected" : ""}
+                  >
+                    ${formatStatus(status)}
+                  </option>
+                `).join("")}
+              </select>
+            </div>
+          </article>
+        `).join("");
+
+        document.querySelectorAll(".status-select").forEach((select) => {
+          select.addEventListener("change", async (event) => {
+            await updateTaskStatus(
+              event.target.dataset.taskId,
+              event.target.value,
+              event.target
+            );
+          });
+        });
+      } catch (error) {
+        taskList.innerHTML = `
+          <p class="error">Could not load tasks: ${escapeHtml(error.message)}</p>
+        `;
+      }
+    }
+
+    async function createTask(event) {
+      event.preventDefault();
+
+      const button = document.getElementById("create-task-button");
+      const title = document.getElementById("task-title").value.trim();
+      const description = document.getElementById("task-description").value.trim();
+      const priority = document.getElementById("task-priority").value;
+      const assignedTo = document.getElementById("task-assigned-to").value.trim() || "Ava";
+
+      taskFormMessage.className = "";
+      taskFormMessage.textContent = "";
+      button.disabled = true;
+      button.textContent = "Creating...";
+
+      try {
+        const response = await fetch(`${API_BASE}/tasks`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            title,
+            description,
+            priority,
+            assigned_to: assignedTo
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Unable to create task.");
+        }
+
+        taskForm.reset();
+        document.getElementById("task-priority").value = "normal";
+        document.getElementById("task-assigned-to").value = "Ava";
+
+        taskFormMessage.className = "success";
+        taskFormMessage.textContent = "Task created.";
+
+        await loadTasks();
+      } catch (error) {
+        taskFormMessage.className = "error";
+        taskFormMessage.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Create Task";
+      }
+    }
+
+    async function updateTaskStatus(taskId, status, selectElement) {
+      const originalStatus = selectElement.dataset.previousStatus || "";
+
+      try {
+        selectElement.disabled = true;
+
+        const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ status })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Unable to update task status.");
+        }
+
+        selectElement.dataset.previousStatus = status;
+        await loadTasks();
+      } catch (error) {
+        alert(`Task update failed: ${error.message}`);
+
+        if (originalStatus) {
+          selectElement.value = originalStatus;
+        }
+
+        await loadTasks();
+      } finally {
+        selectElement.disabled = false;
+      }
+    }
+
+    async function sendMessage(event) {
+      event.preventDefault();
+
+      const message = chatInput.value.trim();
+      const button = document.getElementById("send-message-button");
+
+      if (!message) {
+        return;
+      }
+
+      chatError.textContent = "";
+      addChatMessage("user", message);
+
+      chatInput.value = "";
+      chatInput.disabled = true;
+      button.disabled = true;
+      button.textContent = "Sending...";
+
+      try {
+        const response = await fetch(`${API_BASE}/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ message })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Unable to reach Ava.");
+        }
+
+        addChatMessage("ava", data.reply || "I was unable to generate a response.");
+      } catch (error) {
+        chatError.textContent = error.message;
+      } finally {
+        chatInput.disabled = false;
+        button.disabled = false;
+        button.textContent = "Send Message";
+        chatInput.focus();
+      }
+    }
+
+    taskForm.addEventListener("submit", createTask);
+    chatForm.addEventListener("submit", sendMessage);
+
+    loadTasks();
+  </script>
+</body>
+</html>
