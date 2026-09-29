@@ -1,5 +1,18 @@
 {
   "name": "ai-firm",
   "main": "src/index.js",
-  "compatibility_date": "2026-09-28"
+  "compatibility_date": "2026-09-28",
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "firm-agents-db",
+      "database_id": "e7f5822c-c0ba-4fb7-9aa4-ac6eb0199469"
+    }
+  ],
+
+  "ai": {
+    "binding": "AI"
+  }
 }
+
