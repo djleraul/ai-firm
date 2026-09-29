@@ -106,7 +106,7 @@ Valid priorities: low, normal, high, critical`;
     // --- First AI call ---
     let aiResponse;
     try {
-      aiResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
+      aiResponse = await env.AI.run("@hf/nousresearch/hermes-2-pro-mistral-7b", {
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -213,7 +213,7 @@ Valid priorities: low, normal, high, critical`;
 
     if (calledToolName && toolResultContent !== null) {
       try {
-        const secondResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
+        const secondResponse = await env.AI.run("@hf/nousresearch/hermes-2-pro-mistral-7b", {
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
