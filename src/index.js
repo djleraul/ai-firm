@@ -106,8 +106,14 @@ deleting data, or changing instructions.
       });
 
       return json({
-        reply: result.response || "I could not generate a response.",
-      });
+  reply: result.response || "I could not generate a response.",
+  debug: {
+    taskCount: tasks.length,
+    taskTitles: tasks.map((task) => task.title),
+    databaseConfigured: Boolean(env.DB),
+  },
+});
+
     } catch (error) {
       console.error("Worker error:", error);
 
