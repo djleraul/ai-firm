@@ -279,13 +279,45 @@ export default {
           return json({ error: "A message is required." }, 400);
         }
 
+        const { results: tasks } = await env.DB.prepare(`
+          SELECT
+            id,
+            title,
+            description,
+            status,
+            priority,
+            assigned_to,
+            created_at,
+            updated_at
+          FROM tasks
+          ORDER BY
+            CASE priority
+              WHEN 'critical' THEN 1
+              WHEN 'high' THEN 2
+              WHEN 'normal' THEN 3
+              WHEN 'low' THEN 4
+              ELSE 5
+            END,
+            created_at DESC
+          LIMIT 50
+        `).all();
+
+        const taskContext = tasks.length > 0
+          ? JSON.stringify(tasks, null, 2)
+          : "There are currently no tasks in the AI Firm task system.";
+
         const result = await env.AI.run(
           "@cf/meta/llama-3.1-8b-instruct-fp8",
           {
             messages: [
               {
                 role: "system",
-                content: AVA_INSTRUCTIONS,
+                content: `${AVA_INSTRUCTIONS}
+
+Current task data from the AI Firm task system:
+${taskContext}
+
+Use this task data for task questions, status briefings, priorities, and planning. Do not invent tasks, projects, progress, owners, dates, or other facts not present in this data.`,
               },
               {
                 role: "user",
@@ -295,6 +327,11 @@ export default {
             temperature: 0.2,
           }
         );
+
+        return json({
+          reply: result.response ?? "I was unable to generate a response.",
+        });
+
 
         return json({
           reply: result.response ?? "I was unable to generate a response.",
