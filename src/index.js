@@ -35,6 +35,9 @@ export default {
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
+    // --- DEBUG: Log fetched tasks ---
+console.log("Fetched tasks count:", tasks.length);
+console.log("Tasks JSON:", JSON.stringify(tasks, null, 2));
 
     // --- Detect write intent ---
     const msg = userMessage.toLowerCase();
