@@ -1,64 +1,10 @@
-const AVA_INSTRUCTIONS = `
-You are Ava, the chief of staff for AI Firm.
-
-IDENTITY
-- Your name is Ava.
-- AI Firm is the organization you work for, not your name.
-- If asked your name, reply: "My name is Ava."
-
-GROUNDING RULES — FOLLOW THESE BEFORE ANSWERING
-- Do not invent facts about AI Firm, its office, city, employees, customers, projects, meetings, finances, systems, or task status.
-- Do not claim to have a physical body, desk, office, conference room, city, or location.
-- Do not imply that you can see, access, remember, send, change, publish, purchase, delete, or manage anything unless that capability and information have been explicitly provided in this conversation.
-- Treat information supplied by the user or connected tools/database as known. Treat everything else about AI Firm as unknown.
-- When information is unknown, say so plainly, then offer a useful next step. Never fill gaps with plausible-sounding details.
-
-EXAMPLES
-User: "Where are you?"
-Ava: "I don’t have a physical location. I’m Ava, the chief of staff for AI Firm."
-
-User: "What is the status of our projects?"
-Ava: "I don’t have project status information yet. Share the projects or connect a task source, and I can organize a status briefing."
-
-User: "Who is on our team?"
-Ava: "I only know the team information you provide or that is available in connected records."
-
-ROLE
-Help the user:
-- Organize priorities
-- Turn ideas into concrete tasks
-- Create practical plans
-- Track decisions and open questions
-- Prepare briefings from information the user provides
-
-APPROVALS
-Ask for explicit approval before sending messages, spending money, publishing, deleting data, or changing instructions.
-
-STYLE
-Be concise, practical, helpful, and honest about uncertainty.
-`;
+const MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
-
-const VALID_STATUSES = [
-  "todo",
-  "in_progress",
-  "blocked",
-  "awaiting_approval",
-  "done",
-  "cancelled",
-];
-
-const VALID_PRIORITIES = [
-  "low",
-  "normal",
-  "high",
-  "critical",
-];
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -70,20 +16,6 @@ function json(data, status = 200) {
   });
 }
 
-function isValidStatus(status) {
-  return VALID_STATUSES.includes(status);
-}
-
-function isValidPriority(priority) {
-  return VALID_PRIORITIES.includes(priority);
-}
-
-function isValidTaskId(taskId) {
-  return /^task_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    taskId
-  );
-}
-
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -93,253 +25,96 @@ export default {
       });
     }
 
-    const url = new URL(request.url);
-    const path = url.pathname;
+    if (request.method !== "POST") {
+      return json(
+        { error: "Use POST with a JSON body containing a message field." },
+        405
+      );
+    }
 
     try {
-      // GET /tasks
-      if (request.method === "GET" && path === "/tasks") {
-        const { results } = await env.DB.prepare(`
-          SELECT
-            id,
-            title,
-            description,
-            status,
-            priority,
-            assigned_to,
-            created_at,
-            updated_at
-          FROM tasks
-          ORDER BY
-            CASE priority
-              WHEN 'critical' THEN 1
-              WHEN 'high' THEN 2
-              WHEN 'normal' THEN 3
-              WHEN 'low' THEN 4
-            END,
-            created_at DESC
-        `).all();
+      const body = await request.json();
+      const message = typeof body.message === "string" ? body.message.trim() : "";
 
-        return json({ tasks: results });
+      if (!message) {
+        return json({ error: "A non-empty message is required." }, 400);
       }
 
-      // POST /tasks
-      if (request.method === "POST" && path === "/tasks") {
-        const body = await request.json();
+      const { results: tasks } = await env.DB.prepare(`
+        SELECT
+          id,
+          title,
+          description,
+          assigned_to,
+          status,
+          priority,
+          created_at,
+          updated_at,
+          completed_at
+        FROM tasks
+        ORDER BY
+          CASE priority
+            WHEN 'critical' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'normal' THEN 3
+            WHEN 'low' THEN 4
+            ELSE 5
+          END,
+          updated_at DESC
+        LIMIT 50
+      `).all();
 
-        if (!body.title || typeof body.title !== "string") {
-          return json({ error: "A task title is required." }, 400);
-        }
+      const taskContext = tasks.length > 0
+        ? JSON.stringify(tasks, null, 2)
+        : "No task records currently exist.";
 
-        const title = body.title.trim();
+      const systemPrompt = `
+You are Ava, Chief of Staff for AI Firm.
 
-        if (!title) {
-          return json({ error: "A task title is required." }, 400);
-        }
+Your role is to organize priorities, create clear plans, track decisions,
+and provide concise operational briefings.
 
-        const description =
-          typeof body.description === "string"
-            ? body.description.trim()
-            : "";
-
-        const status = isValidStatus(body.status) ? body.status : "todo";
-        const priority = isValidPriority(body.priority)
-          ? body.priority
-          : "normal";
-
-        const assignedTo =
-          typeof body.assigned_to === "string" && body.assigned_to.trim()
-            ? body.assigned_to.trim()
-            : "Ava";
-
-        const taskId = `task_${crypto.randomUUID()}`;
-
-        await env.DB.prepare(`
-          INSERT INTO tasks (
-            id,
-            title,
-            description,
-            status,
-            priority,
-            assigned_to,
-            created_at,
-            updated_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `)
-          .bind(
-            taskId,
-            title,
-            description,
-            status,
-            priority,
-            assignedTo
-          )
-          .run();
-
-        const task = await env.DB.prepare(`
-          SELECT * FROM tasks WHERE id = ?
-        `)
-          .bind(taskId)
-          .first();
-
-        return json({ task }, 201);
-      }
-
-      // PATCH /tasks/:id
-      if (request.method === "PATCH" && path.startsWith("/tasks/")) {
-        const taskId = path.split("/")[2];
-
-        if (!isValidTaskId(taskId)) {
-          return json({ error: "A valid task ID is required." }, 400);
-        }
-
-        const existingTask = await env.DB.prepare(`
-          SELECT * FROM tasks WHERE id = ?
-        `)
-          .bind(taskId)
-          .first();
-
-        if (!existingTask) {
-          return json({ error: "Task not found." }, 404);
-        }
-
-        const body = await request.json();
-
-        const title =
-          typeof body.title === "string" && body.title.trim()
-            ? body.title.trim()
-            : existingTask.title;
-
-        const description =
-          typeof body.description === "string"
-            ? body.description.trim()
-            : existingTask.description;
-
-        const status = body.status
-          ? isValidStatus(body.status)
-            ? body.status
-            : null
-          : existingTask.status;
-
-        const priority = body.priority
-          ? isValidPriority(body.priority)
-            ? body.priority
-            : null
-          : existingTask.priority;
-
-        const assignedTo =
-          typeof body.assigned_to === "string" && body.assigned_to.trim()
-            ? body.assigned_to.trim()
-            : existingTask.assigned_to;
-
-        if (!status) {
-          return json({ error: "Invalid task status." }, 400);
-        }
-
-        if (!priority) {
-          return json({ error: "Invalid task priority." }, 400);
-        }
-
-        await env.DB.prepare(`
-          UPDATE tasks
-          SET
-            title = ?,
-            description = ?,
-            status = ?,
-            priority = ?,
-            assigned_to = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `)
-          .bind(
-            title,
-            description,
-            status,
-            priority,
-            assignedTo,
-            taskId
-          )
-          .run();
-
-        const task = await env.DB.prepare(`
-          SELECT * FROM tasks WHERE id = ?
-        `)
-          .bind(taskId)
-          .first();
-
-        return json({ task });
-      }
-
-      // POST / — Ava chat
-      if (request.method === "POST" && path === "/") {
-        const body = await request.json();
-
-        if (!body.message || typeof body.message !== "string") {
-          return json({ error: "A message is required." }, 400);
-        }
-
-        const { results: tasks } = await env.DB.prepare(`
-          SELECT
-            id,
-            title,
-            description,
-            status,
-            priority,
-            assigned_to,
-            created_at,
-            updated_at
-          FROM tasks
-          ORDER BY
-            CASE priority
-              WHEN 'critical' THEN 1
-              WHEN 'high' THEN 2
-              WHEN 'normal' THEN 3
-              WHEN 'low' THEN 4
-              ELSE 5
-            END,
-            created_at DESC
-          LIMIT 50
-        `).all();
-
-        const taskContext = tasks.length > 0
-          ? JSON.stringify(tasks, null, 2)
-          : "There are currently no tasks in the AI Firm task system.";
-
-        const result = await env.AI.run(
-          "@cf/meta/llama-3.1-8b-instruct-fp8",
-          {
-            messages: [
-              {
-                role: "system",
-                content: `${AVA_INSTRUCTIONS}
-
-Current task data from the AI Firm task system:
+AUTHORITATIVE TASK DATABASE:
 ${taskContext}
 
-Use this task data for task questions, status briefings, priorities, and planning. Do not invent tasks, projects, progress, owners, dates, or other facts not present in this data.`,
-              },
-              {
-                role: "user",
-                content: body.message,
-              },
-            ],
-            temperature: 0.2,
-          }
-        );
+RULES FOR TASK QUESTIONS:
+- The task database above is the source of truth for task information.
+- If a requested task is present, report its title, status, priority,
+  assignee, and relevant description or dates.
+- Never say you lack task access or that no task source is connected when
+  task records are provided above.
+- Do not invent tasks, statuses, assignments, dates, or other details.
+- If the requested task is not in the database, say that it was not found.
+- Be concise, practical, and honest about uncertainty.
 
-        return json({
-          reply: result.response ?? "I was unable to generate a response.",
-        });
+Actions requiring approval: sending messages, spending money, publishing,
+deleting data, or changing instructions.
+`;
 
+      const result = await env.AI.run(MODEL, {
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: message,
+          },
+        ],
+        temperature: 0.2,
+      });
 
-      return json({ error: "Route not found." }, 404);
+      return json({
+        reply: result.response || "I could not generate a response.",
+      });
     } catch (error) {
-      console.error(error);
+      console.error("Worker error:", error);
 
       return json(
         {
-          error: error instanceof Error ? error.message : "Worker error",
+          error: "Unable to process the request.",
+          details: error instanceof Error ? error.message : String(error),
         },
         500
       );
